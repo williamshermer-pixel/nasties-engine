@@ -7,15 +7,15 @@
 # baked-in checkpoints like the -sdxl/-flux1-* tags) ‚Äî the right base for us
 # since we bring our own model set below.
 #
-# SIZE ‚Äî v1 targeted <30GB (Wan 5B only). This is v2, "the one big bake": it
-# adds Hunyuan 1.5, Chroma1-HD, an inpainting checkpoint, IP-Adapter, and the
-# detailer/hand-refiner stack on top of v1. Expected total image size is now
-# ~100-105GB, NOT <30GB ‚Äî that old target is superseded, see below. Before
-# this lands: raise the RunPod endpoint's CONTAINER DISK to >=120GB (an
-# endpoint settings knob, not this file) or new workers can't even pull the
-# image. FlashBoot-paused workers keep whatever image+env they last booted
-# with ‚Äî after this build lands, TERMINATE ALL WORKERS on the endpoint so the
-# next cold start actually pulls v2 instead of resuming a stale v1 worker.
+# SIZE ‚Äî this is v2-LITE: the feature bake without the new engines. It
+# adds the inpainting checkpoint (WOUND IT), IP-Adapter, FLF2V node (AIM THE
+# KILL), the detailer/hand-refiner stack, and the MMAudio install FIX on top
+# of v1 ‚Äî total ~42GB. Hunyuan 1.5 + Chroma are EXCLUDED from this image:
+# RunPod's GitHub builder has a HARD 30-MINUTE build cap (hit 2026-07-16 at
+# ~100GB) and the full bake does not fit. The new engines ship later via a
+# pre-built registry image (RunPod's own recommended path for big images).
+# After this build lands: TERMINATE ALL WORKERS (FlashBoot keeps stale
+# images+env). Container disk 120GB already set ‚Äî fine for this size too.
 FROM runpod/worker-comfyui:5.8.6-base
 
 # ===========================================================================
@@ -53,37 +53,6 @@ RUN wget -q -O /comfyui/models/mmaudio/mmaudio_large_44k_v2_fp16.safetensors "$M
 # workflow's IMAGE_CKPT default expects (juggernautXL_ragnarok.safetensors).
 ARG JUGGERNAUT_URL=https://huggingface.co/Granddyser/Juggernaut_XL_Ragnarok/resolve/main/juggernautXL_ragnarokBy.safetensors
 RUN wget -q -O /comfyui/models/checkpoints/juggernautXL_ragnarok.safetensors "$JUGGERNAUT_URL?download=true"
-
-# HUNYUAN 1.5 ‚Äî 480p t2v/i2v cfg-distilled + 720p super-res pass, plus the
-# text/glyph encoders, VAE, and clip_vision it needs. All from one repackaged
-# split_files tree, so one ARG base for the whole family like Wan above.
-ARG HY=https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files
-
-RUN mkdir -p /comfyui/models/latent_upscale_models /comfyui/models/clip_vision
-
-RUN wget -q -O /comfyui/models/diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp8_scaled.safetensors "$HY/diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp8_scaled.safetensors?download=true" && \
-    wget -q -O /comfyui/models/diffusion_models/hunyuanvideo1.5_480p_i2v_cfg_distilled_fp8_scaled.safetensors "$HY/diffusion_models/hunyuanvideo1.5_480p_i2v_cfg_distilled_fp8_scaled.safetensors?download=true" && \
-    wget -q -O /comfyui/models/diffusion_models/hunyuanvideo1.5_720p_sr_distilled_fp8_scaled.safetensors "$HY/diffusion_models/hunyuanvideo1.5_720p_sr_distilled_fp8_scaled.safetensors?download=true"
-
-RUN wget -q -O /comfyui/models/latent_upscale_models/hunyuanvideo15_latent_upsampler_720p.safetensors "$HY/latent_upscale_models/hunyuanvideo15_latent_upsampler_720p.safetensors?download=true"
-
-RUN wget -q -O /comfyui/models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors "$HY/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors?download=true" && \
-    wget -q -O /comfyui/models/text_encoders/byt5_small_glyphxl_fp16.safetensors "$HY/text_encoders/byt5_small_glyphxl_fp16.safetensors?download=true"
-
-RUN wget -q -O /comfyui/models/vae/hunyuanvideo15_vae_fp16.safetensors "$HY/vae/hunyuanvideo15_vae_fp16.safetensors?download=true"
-
-RUN wget -q -O /comfyui/models/clip_vision/sigclip_vision_patch14_384.safetensors "$HY/clip_vision/sigclip_vision_patch14_384.safetensors?download=true"
-
-# CHROMA1-HD ‚Äî Apache 2.0, the flagship-photoreal bench candidate. Unlike the
-# Flux/SD3 family this one is actually clear to ship commercially. Text
-# encoder and VAE come from separate public repos, not a shared split_files
-# tree, so no shared ARG base here.
-RUN wget -q -O /comfyui/models/diffusion_models/Chroma1-HD.safetensors "https://huggingface.co/lodestones/Chroma1-HD/resolve/main/Chroma1-HD.safetensors?download=true" && \
-    wget -q -O /comfyui/models/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn_scaled.safetensors?download=true"
-
-# Flux VAE via a public non-gated mirror ‚Äî the BFL original is login-gated
-# and we don't want an auth hop in the build.
-RUN wget -q -O /comfyui/models/vae/ae.safetensors "https://huggingface.co/ffxvs/vae-flux/resolve/main/ae.safetensors?download=true"
 
 # JUGGERNAUT XL INPAINTING ‚Äî masked inpaint pass (WOUND IT stage). Unofficial
 # community mirror, could vanish ‚Äî an R2 mirror is queued as a follow-up.
@@ -180,11 +149,12 @@ RUN git clone --depth 1 https://github.com/kijai/ComfyUI-MMAudio \
 
 # ---------------------------------------------------------------------------
 # DELIBERATELY EXCLUDED from this image:
-#   - Qwen-Image (20.7GB) ‚Äî title-art only, not on the launch path. Its text
-#     encoder (qwen_2.5_vl_7b_fp8_scaled.safetensors) is already baked above
-#     via Hunyuan 1.5 under an identical filename ‚Äî adding Qwen-Image later
-#     is one wget for the diffusion model, not a second text-encoder pull.
-#     DO NOT double-bake that encoder under a Qwen-Image-specific path.
+#   - Hunyuan 1.5 family (~30GB) + Chroma1-HD (~23GB) ‚Äî the 30-min GitHub
+#     build cap cannot fit them; they arrive via a pre-built registry image
+#     (see SERVERLESS.md). Their text encoders (qwen_2.5_vl, t5xxl, flux ae)
+#     are excluded with them ‚Äî do not re-add here.
+#   - Qwen-Image (20.7GB) ‚Äî title-art only, not on the launch path. Ships
+#     with the registry image alongside Hunyuan/Chroma if ever needed.
 #   - All Civitai gore LoRAs ‚Äî need authenticated R2 mirrors we haven't built
 #     yet, and the Flux-family ones are non-commercial-licensed, which is
 #     dead on arrival for a paid platform regardless of mirror.
